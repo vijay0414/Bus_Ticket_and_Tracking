@@ -1,0 +1,6 @@
+body { font-family: Inter, system-ui, Arial, sans-serif; margin: 0; padding: 20px; background: #f7fafc }
+.conductor-app { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px }
+.steps { display: grid; gap: 12px }
+.step { padding: 12px; border: 1px solid #eee; border-radius: 6px }
+.step h3 { margin: 0 0 8px 0 }
+.status { margin-top: 10px; color: #1565c0 }

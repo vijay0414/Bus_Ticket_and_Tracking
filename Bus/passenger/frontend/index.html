@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>🚌 Real-Time Passenger Dashboard</title>
+    <meta
+      name="description"
+      content="IoT-enabled real-time passenger and seat monitoring dashboard for public bus transport."
+    />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/bus-icon.png" />
+
+    <!-- Leaflet CSS (for map rendering) -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha512-o9N1j2bZLJz1FkPt9xqfyzfT8vU5lHr09YOV+eL6HPy1j7R2LQGx5dI2UZp2lG6G0AO3t8f+1OXX8h8wrf5wQw=="
+      crossorigin=""
+    />
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/src/index.css" />
+  </head>
+
+  <body>
+    <!-- Header -->
+    <header>
+      🚌 Real-Time Passenger Dashboard
+    </header>
+
+    <!-- React Root -->
+    <div id="root"></div>
+
+    <!-- Vite React Entry Point -->
+    <script type="module" src="/src/main.jsx"></script>
+
+    <script>
+      document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>
