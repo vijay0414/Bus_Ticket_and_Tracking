@@ -112,7 +112,6 @@ npm run dev
 ##  Roadmap
 - [ ] **Authentication**: Secure login for conductors.
 - [ ] **Payments**: Integrated UPI/Card payments for tickets.
-- [ ] **ETA Prediction**: AI-based time estimates based on traffic.
 - [ ] **Admin Dashboard**: Analytics for bus fleet management.
 
 ---
