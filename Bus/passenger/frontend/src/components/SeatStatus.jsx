@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-// Use HTTPS backend for network location access
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://localhost:5000'
+// Use standard backend URL pattern
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
 
 export default function SeatStatus({ busInfo, onSeatDataUpdate }) {
   const [seatData, setSeatData] = useState({
@@ -13,24 +13,19 @@ export default function SeatStatus({ busInfo, onSeatDataUpdate }) {
   });
 
   const [passengersByStop, setPassengersByStop] = useState([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const totalSeats = 52; // assume fixed capacity
+    const totalSeats = 52; 
 
-    // Fetch ticket breakdown by destination for this bus and compute totals from tickets
     const fetchAndCompute = async () => {
       if (!busInfo || !busInfo.busId) {
-        const updated = {
-          totalSeats,
-          passengersCount: 0,
-          ticketsIssued: 0,
-          availableSeats: totalSeats,
-          extraPassengers: 0,
-        }
-        setSeatData(updated)
-        setPassengersByStop([])
-        if (onSeatDataUpdate) onSeatDataUpdate(updated)
-        return
+        const updated = { totalSeats, passengersCount: 0, ticketsIssued: 0, availableSeats: totalSeats, extraPassengers: 0 };
+        setSeatData(updated);
+        setPassengersByStop([]);
+        setLoading(false);
+        if (onSeatDataUpdate) onSeatDataUpdate(updated);
+        return;
       }
 
       try {
@@ -39,56 +34,35 @@ export default function SeatStatus({ busInfo, onSeatDataUpdate }) {
         const json = res.ok ? await res.json() : { data: [] }
         const tickets = (json.data || [])
 
-        // Group by destination (prefer selection.to, fallback to toCity)
         const map = {}
         let computedPassengers = 0
         tickets.forEach(t => {
-          const dest = (t.selection && t.selection.to) || t.toCity || t.selection?.to || 'Unknown'
-          const count = (t.totalPassengers != null) ? Number(t.totalPassengers) : ((t.passengers?.adults||0) + (t.passengers?.children||0))
-          const safeCount = Number.isFinite(count) ? count : 0
-          map[dest] = (map[dest] || 0) + safeCount
-          computedPassengers += safeCount
+          const dest = (t.selection && t.selection.to) || t.toCity || 'Unknown'
+          const count = Number(t.totalPassengers || (t.passengers?.adults || 0) + (t.passengers?.children || 0))
+          map[dest] = (map[dest] || 0) + count
+          computedPassengers += count
         })
 
-        // Convert to sorted array (keep original route order if available)
         let result = Object.keys(map).map(k => ({ city: k, passengers: map[k] }))
         if (busInfo.routeCities && Array.isArray(busInfo.routeCities)) {
           const order = busInfo.routeCities
           result.sort((a,b) => (order.indexOf(a.city) - order.indexOf(b.city)))
-        } else if (busInfo.toCity) {
-          result.sort((a,b) => (a.city === busInfo.toCity ? 1 : (b.city === busInfo.toCity ? -1 : 0)))
         }
 
         setPassengersByStop(result)
 
-        // Use computedPassengers from tickets if available; fallback to busInfo.passengersCount
         const passengersCount = computedPassengers || (busInfo?.passengersCount ?? 0)
         const ticketsIssued = tickets.length || (busInfo?.ticketsIssued ?? 0)
+        const availableSeats = Math.max(0, totalSeats - passengersCount)
+        const extraPassengers = Math.max(0, passengersCount - totalSeats)
 
-        const availableSeats = passengersCount <= totalSeats ? totalSeats - passengersCount : 0
-        const extraPassengers = passengersCount > totalSeats ? passengersCount - totalSeats : 0
-
-        const updatedSeatData = {
-          totalSeats,
-          passengersCount,
-          ticketsIssued,
-          availableSeats,
-          extraPassengers,
-        }
-
+        const updatedSeatData = { totalSeats, passengersCount, ticketsIssued, availableSeats, extraPassengers }
         setSeatData(updatedSeatData)
+        setLoading(false)
         if (onSeatDataUpdate) onSeatDataUpdate(updatedSeatData)
       } catch (err) {
         console.error('Failed to load ticket breakdown:', err)
-        // Fallback to using busInfo values
-        const passengersCount = busInfo?.passengersCount ?? 0
-        const ticketsIssued = busInfo?.ticketsIssued ?? 0
-        const availableSeats = passengersCount <= totalSeats ? totalSeats - passengersCount : 0
-        const extraPassengers = passengersCount > totalSeats ? passengersCount - totalSeats : 0
-        const updatedSeatData = { totalSeats, passengersCount, ticketsIssued, availableSeats, extraPassengers }
-        setSeatData(updatedSeatData)
-        setPassengersByStop([])
-        if (onSeatDataUpdate) onSeatDataUpdate(updatedSeatData)
+        setLoading(false)
       }
     }
 
@@ -96,65 +70,108 @@ export default function SeatStatus({ busInfo, onSeatDataUpdate }) {
   }, [busInfo]);
 
   return (
-    <div className="seat-status fade-in">
-      <h2 style={{ textAlign: "center", marginBottom: "20px" }}>
-        <span className="live-indicator"></span>
-        <span style={{ fontSize: "22px", fontWeight: "600", color: "#222" }}>
-          Live Passenger & Seat Data
-        </span>
-      </h2>
+    <div style={{
+      fontFamily: "'Outfit', sans-serif",
+      backgroundColor: "#fcfdfe",
+      padding: "25px",
+      borderRadius: "20px",
+      boxShadow: "0 10px 40px rgba(0,0,0,0.04)",
+      border: "1px solid rgba(0,0,0,0.02)"
+    }}>
+      {/* Header Section */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', marginBottom: '30px' }}>
+        <div style={{ 
+          width: '12px', height: '12px', backgroundColor: '#10b981', borderRadius: '50%',
+          boxShadow: '0 0 12px rgba(16, 185, 129, 0.6)',
+          animation: 'pulse 2s infinite'
+        }}></div>
+        <h2 style={{ margin: 0, fontSize: "22px", fontWeight: "700", color: "#1f2937", letterSpacing: "-0.5px" }}>
+          Live Passenger & Seat Status
+        </h2>
+      </div>
 
-      <div className="seat-status" style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        {/* Left: passenger breakdown by stop */}
-        <div className="seat-card passenger-by-stop" style={{ minWidth: 180 }}>
-          <p>Passengers Drop-Off at Each Stops</p>
-          {passengersByStop && passengersByStop.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ display: 'flex', gap: '25px', flexWrap: 'wrap' }}>
+        {/* Left: Drop-off Breakdown Card */}
+        <div style={{ 
+          flex: "1", 
+          minWidth: "280px",
+          background: "#ffffff",
+          borderRadius: "18px",
+          padding: "24px",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.02)",
+          border: "1px solid #f1f5f9"
+        }}>
+          <h3 style={{ fontSize: "14px", color: "#64748b", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "20px", textAlign: "center" }}>
+            Scheduled Drop-Offs
+          </h3>
+          
+          {passengersByStop.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {passengersByStop.map((s, idx) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#333' }}>{s.city}</span>
-                  <strong style={{ color: '#FF6B6B' }}>{s.passengers}</strong>
+                <div key={idx} style={{ 
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: "10px 0", borderBottom: idx !== passengersByStop.length - 1 ? "1px solid #f8fafc" : "none"
+                }}>
+                  <span style={{ fontSize: "16px", fontWeight: "500", color: "#334155" }}>{s.city}</span>
+                  <div style={{ 
+                    backgroundColor: "#fef2f2", color: "#ef4444", padding: "4px 12px", 
+                    borderRadius: "12px", fontSize: "14px", fontWeight: "700" 
+                  }}>
+                    {s.passengers}
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ color: '#777', fontSize: 13 }}>No ticket breakdown available</div>
+            <div style={{ textAlign: "center", padding: "20px", color: "#94a3b8", fontSize: "14px", fontStyle: "italic" }}>
+              {loading ? "Calculating breakdown..." : "No drop-off data available"}
+            </div>
           )}
         </div>
-       
-        <center>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <div className="seat-card">
-            <p>Total Seats</p>
-            <span className="total-seats">{seatData.totalSeats}</span>
-          </div>
-          
-          {/* <div className="seat-card">
-            <p>Tickets Issued</p>
-            <span className="tickets-issued">{seatData.ticketsIssued}</span>
-          </div> */}
 
-          <div className="seat-card">
-            <p>Passengers</p>
-            <span className="passengers-count" style={{ color: "#c20f0fff", fontWeight: "bold" }}>
-              {seatData.passengersCount}
-            </span>
-          </div>
-
-          <div className="seat-card">
-            <p>Available Seats</p>
-            <span className="available-seats">{seatData.availableSeats}</span>
-          </div>
-
-          <div className="seat-card">
-            <p>Extra Passengers</p>
-            <span className={`extra-passengers ${seatData.extraPassengers > 0 ? "extra-alert" : ""}`}>
-              {seatData.extraPassengers}
-            </span>
-          </div>
+        {/* Right: Key Stats Grid */}
+        <div style={{ flex: "2", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "15px" }}>
+          {[
+            { label: "Total Seats", value: seatData.totalSeats, color: "#3b82f6", bg: "#eff6ff" },
+            { label: "Current Passenegrs", value: seatData.passengersCount, color: "#ef4444", bg: "#fef2f2" },
+            { label: "Empty Seats", value: seatData.availableSeats, color: "#10b981", bg: "#ecfdf5" },
+            { 
+              label: "ExtraPassengers", 
+              value: seatData.extraPassengers, 
+              color: seatData.extraPassengers > 0 ? "#f59e0b" : "#94a3b8", 
+              bg: seatData.extraPassengers > 0 ? "#fffbeb" : "#f8fafc" 
+            }
+          ].map((stat, i) => (
+            <div key={i} style={{
+              backgroundColor: "#fff",
+              borderRadius: "18px",
+              padding: "20px",
+              textAlign: "center",
+              border: `1px solid ${stat.bg}`,
+              transition: "transform 0.2s ease",
+              cursor: "default"
+            }}>
+              <p style={{ margin: "0 0 15px 0", fontSize: "12px", fontWeight: "600", color: "#64748b", textTransform: "uppercase" }}>{stat.label}</p>
+              <div style={{ 
+                fontSize: "28px", fontWeight: "800", color: stat.color, 
+                display: "inline-block", padding: "8px 16px", borderRadius: "14px", backgroundColor: stat.bg
+              }}>
+                {stat.value}
+              </div>
+            </div>
+          ))}
         </div>
-        </center>
       </div>
+
+      <style>{`
+        @keyframes pulse {
+          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+          70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+      `}</style>
     </div>
   );
 }

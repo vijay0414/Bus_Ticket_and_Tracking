@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import './App.css'
 
-// Use HTTPS for network location access, allow override via VITE_BACKEND_URL
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://localhost:5000'
+// Use HTTP for development as primary
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
 const socket = io(BACKEND, { transports: ['websocket'] })
 
 export default function App() {
@@ -35,8 +35,8 @@ export default function App() {
   const [successMessage, setSuccessMessage] = useState('')
 
   const lastCoordsRef = useRef(null)
-  // `watchIdRef` stores either a geolocation watchId (number) or an interval id (fallback)
   const watchIdRef = useRef(null)
+  const intervalIdRef = useRef(null)
 
   // Cleanup on unmount
   useEffect(() => {
@@ -52,12 +52,12 @@ export default function App() {
       // Stop watching position (cleanup)
       try {
         if (watchIdRef.current != null) {
-          if (typeof watchIdRef.current === 'number' && navigator.geolocation && navigator.geolocation.clearWatch) {
-            navigator.geolocation.clearWatch(watchIdRef.current)
-          } else {
-            clearInterval(watchIdRef.current)
-          }
+          navigator.geolocation.clearWatch(watchIdRef.current)
           watchIdRef.current = null
+        }
+        if (intervalIdRef.current != null) {
+          clearInterval(intervalIdRef.current)
+          intervalIdRef.current = null
         }
       } catch (e) {
         console.warn('Failed to clear geolocation watcher on unmount', e)
@@ -68,29 +68,49 @@ export default function App() {
     }
   }, [])
 
-  // Persist step to sessionStorage so tab changes or reloads keep the current step
+  // Persist state to sessionStorage so tab changes or reloads don't lose data
   useEffect(() => {
-    // load saved step on first mount
     try {
-      const saved = sessionStorage.getItem('conductor_step')
-      if (saved) {
-        const num = Number(saved)
+      const savedStep = sessionStorage.getItem('conductor_step')
+      if (savedStep) {
+        const num = Number(savedStep)
         if (!Number.isNaN(num)) {
           setStep(num)
           stepRef.current = num
         }
       }
+
+      const savedBusId = sessionStorage.getItem('conductor_busId')
+      if (savedBusId) setBusId(savedBusId)
+
+      const savedFrom = sessionStorage.getItem('conductor_fromCity')
+      if (savedFrom) setFromCity(savedFrom)
+
+      const savedTo = sessionStorage.getItem('conductor_toCity')
+      if (savedTo) setToCity(savedTo)
+
+      const savedIntermediates = sessionStorage.getItem('conductor_intermediates')
+      if (savedIntermediates) setIntermediates(JSON.parse(savedIntermediates))
+
+      const savedLoggedIn = sessionStorage.getItem('conductor_isLoggedIn')
+      if (savedLoggedIn === 'true') setIsLoggedIn(true)
+
     } catch (e) {
-      // ignore storage errors
+      console.error('Failed to load session state', e)
     }
   }, [])
 
   useEffect(() => {
     try {
       sessionStorage.setItem('conductor_step', String(step))
+      sessionStorage.setItem('conductor_busId', busId)
+      sessionStorage.setItem('conductor_fromCity', fromCity)
+      sessionStorage.setItem('conductor_toCity', toCity)
+      sessionStorage.setItem('conductor_intermediates', JSON.stringify(intermediates))
+      sessionStorage.setItem('conductor_isLoggedIn', String(isLoggedIn))
     } catch (e) {}
     stepRef.current = step
-  }, [step])
+  }, [step, busId, fromCity, toCity, intermediates, isLoggedIn])
 
   // Join bus room when logged in
   useEffect(() => {
@@ -126,10 +146,49 @@ export default function App() {
       })
 
       if (res.ok) {
+        const result = await res.json()
+        const existingBus = result.data
+
+        console.log('🏁 Login successful. Existing data:', existingBus)
+
         setIsLoggedIn(true)
         setSuccessMessage(`✅ Logged in as Bus ${busId}`)
+        
+        // If bus already has a route, populate state and skip to step 5
+        if (existingBus && existingBus.fromCity && existingBus.toCity) {
+          console.log(`📍 Resuming session: ${existingBus.fromCity} → ${existingBus.toCity}`)
+          
+          setFromCity(existingBus.fromCity)
+          setToCity(existingBus.toCity)
+          
+          // routeCities includes from and to, so slice the middle
+          if (existingBus.routeCities && existingBus.routeCities.length > 2) {
+            const stops = existingBus.routeCities.slice(1, -1)
+            console.log('🛑 Restoring intermediate stops:', stops)
+            setIntermediates(stops)
+          } else {
+            setIntermediates([])
+          }
+          
+          setTicketsIssued(existingBus.ticketsIssued || 0)
+          
+          // Pre-set ticketing dropdowns for convenience
+          setPassengersFrom(existingBus.fromCity)
+          setPassengersTo(existingBus.toCity)
+          
+          // Auto-enable location if it was off
+          if (!locationStatus.enabled) {
+            enableLocation()
+          }
+          
+          console.log('🚀 Skipping to Step 5 (Ticketing)')
+          setStep(5) 
+        } else {
+          console.log('🆕 No existing route found, starting fresh flow.')
+          setStep(2) 
+        }
+
         setTimeout(() => setSuccessMessage(''), 3000)
-        setStep(2)
       } else {
         setLoginError('❌ Login failed')
       }
@@ -139,7 +198,7 @@ export default function App() {
   }
 
   // Step 2: Enable Location
-  const XenableLocation = () => {
+  const enableLocation = () => {
     if (!('geolocation' in navigator)) {
       setLocationError('Geolocation not supported in this browser')
       return
@@ -176,23 +235,17 @@ export default function App() {
     )
 
     // Store watch ID for cleanup
-    try {
-      if (watchIdRef.current) {
-        // if there was a previous fallback interval, clear it
-        if (typeof watchIdRef.current !== 'number') clearInterval(watchIdRef.current)
-      }
-    } catch (e) {}
     watchIdRef.current = watchId
     
-    // Set up interval to send location every 1 second (fallback if watchPosition doesn't update frequently enough)
+    // Set up interval to send location every 1 second (essential for second-by-second requirement)
     const intervalId = setInterval(() => {
       if (lastCoordsRef.current) {
         sendLocationUpdate(lastCoordsRef.current)
       }
     }, 1000)
     
-    // Store interval for cleanup (will be cleared in handleLogout)
-    watchIdRef.current = intervalId
+    // Store interval for cleanup
+    intervalIdRef.current = intervalId
     
     // Only set step to 3 when clicking the button, not on every location update
     setLocationStatus({ enabled: true, label: 'On' })
@@ -345,18 +398,22 @@ export default function App() {
 
   // Logout
   const handleLogout = async () => {
+    // Call backend to set bus as offline
     try {
-      // Clear bus data from database (this also clears all related tickets)
-      const res = await fetch(`${BACKEND}/api/buses/${busId}`, { method: 'DELETE' })
-      
-      if (res.ok) {
-        console.log(`✅ Bus ${busId} data cleared from database`)
-      }
-    } catch (err) {
-      console.error('Logout error', err)
+      await fetch(`${BACKEND}/api/conductor/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ busId })
+      });
+    } catch (e) {
+      console.error('Logout API error', e);
     }
 
     // Emit logout event via Socket.IO
+    socket.emit('busLogout', { busId });
+    socket.emit('leaveBus', busId);
+    // Emit logout event via Socket.IO
+    socket.emit('busLogout', { busId })
     socket.emit('leaveBus', busId)
 
     // Reset all state
@@ -374,7 +431,7 @@ export default function App() {
     setTicketsIssued(0)  // ✅ Reset ticket count to 0
     setIsLoggedIn(false)
     setShowMenu(false)
-    setSuccessMessage('✅ Logged out successfully & all data cleared')
+    setSuccessMessage('✅ Session ended and logged out successfully')
     setTimeout(() => setSuccessMessage(''), 3000)
 
     // Clear sessionStorage to reset step on logout
@@ -384,14 +441,12 @@ export default function App() {
 
     // Stop location updates
     if (watchIdRef.current) {
-      try {
-        if (typeof watchIdRef.current === 'number' && navigator.geolocation && navigator.geolocation.clearWatch) {
-          navigator.geolocation.clearWatch(watchIdRef.current)
-        } else {
-          clearInterval(watchIdRef.current)
-        }
-      } catch (e) {}
+      navigator.geolocation.clearWatch(watchIdRef.current)
       watchIdRef.current = null
+    }
+    if (intervalIdRef.current) {
+      clearInterval(intervalIdRef.current)
+      intervalIdRef.current = null
     }
   }
 
@@ -553,28 +608,57 @@ export default function App() {
                 </button>
               </div>
 
-              {intermediates.length > 0 && (
-                <div className="cities-list">
-                  <div className="route-display">
-                    <span className="city">{fromCity}</span>
-                    {intermediates.map((city, idx) => (
-                      <React.Fragment key={idx}>
-                        <span className="arrow">→</span>
+              <div className="cities-list" style={{ marginTop: '20px' }}>
+                <h3 style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>Current Route Progression:</h3>
+                <div className="route-display" style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  alignItems: 'center', 
+                  gap: '10px',
+                  padding: '15px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '8px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <span className="city" style={{ fontWeight: 'bold', color: '#2196F3' }}>{fromCity}</span>
+                  
+                  {intermediates.map((city, idx) => (
+                    <React.Fragment key={idx}>
+                      <span className="arrow" style={{ color: '#adb5bd' }}>→</span>
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '5px', 
+                        backgroundColor: '#fff', 
+                        padding: '4px 10px', 
+                        borderRadius: '20px',
+                        border: '1px solid #dee2e6',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                      }}>
                         <span className="city">{city}</span>
                         <button
                           className="btn-remove"
                           onClick={() => removeIntermediate(idx)}
-                          title="Remove"
+                          style={{ 
+                            border: 'none', 
+                            background: 'none', 
+                            color: '#ff4d4d', 
+                            cursor: 'pointer', 
+                            fontWeight: 'bold',
+                            fontSize: '18px',
+                            padding: '0 5px'
+                          }}
                         >
                           ×
                         </button>
-                      </React.Fragment>
-                    ))}
-                    <span className="arrow">→</span>
-                    <span className="city">{toCity}</span>
-                  </div>
+                      </div>
+                    </React.Fragment>
+                  ))}
+                  
+                  <span className="arrow" style={{ color: '#adb5bd' }}>→</span>
+                  <span className="city" style={{ fontWeight: 'bold', color: '#4CAF50' }}>{toCity}</span>
                 </div>
-              )}
+              </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn-primary" onClick={proceedToTickets}>
@@ -713,7 +797,14 @@ export default function App() {
                   Pay & Issue Ticket
                 </button>
                 <button className="btn-secondary" onClick={() => setStep(4)}>
-                  Previous
+                  Edit Stops
+                </button>
+                <button 
+                  className="btn-secondary" 
+                  style={{ backgroundColor: '#ff9800', color: 'white' }}
+                  onClick={() => setStep(3)}
+                >
+                  Change Route
                 </button>
               </div>
             </div>

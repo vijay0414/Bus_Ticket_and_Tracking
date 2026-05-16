@@ -30,46 +30,25 @@ export default function App() {
     });
 
     socket.on("busUpdate", (data) => {
-      // Normalize incoming coordinates: prefer explicit latitude/longitude, fallback to lat/lng
-      const finalLat = data.latitude !== undefined ? data.latitude : data.lat
-      const finalLng = data.longitude !== undefined ? data.longitude : data.lng
-
-      console.log("📡 Received busUpdate:", {
-        busId: data.busId,
-        lat: finalLat,
-        lng: finalLng,
-        fromCity: data.fromCity,
-        toCity: data.toCity,
-        routeCities: data.routeCities,
-        ticketsIssued: data.ticketsIssued,
-        passengersCount: data.passengersCount,
-        timestamp: new Date().toLocaleTimeString()
-      })
-
-      // Merge update into existing busInfo, ensuring lat/lng fields are kept consistent
+      if (!data || !data.busId) return;
       setBusInfo((prev) => {
-        const base = prev && prev.busId === data.busId ? { ...(prev || {}) } : { ...(prev || {}) }
-        const updated = {
-          ...base,
-          ...(data || {}),
+        if (!prev || prev.busId !== data.busId) return prev;
+
+        const finalLat = data.lat !== undefined ? data.lat : (data.latitude !== undefined ? data.latitude : prev.lat);
+        const finalLng = data.lng !== undefined ? data.lng : (data.longitude !== undefined ? data.longitude : prev.lng);
+
+        console.log(`📡 [Live] Bus ${data.busId} moved to: ${finalLat}, ${finalLng}`);
+
+        return {
+          ...prev,
+          ...data,
           lat: finalLat,
           lng: finalLng,
           latitude: finalLat,
           longitude: finalLng,
-        }
-
-        console.log(`📊 New busInfo state:`, {
-          ticketsIssued: updated.ticketsIssued,
-          passengersCount: updated.passengersCount,
-          lat: updated.lat,
-          lng: updated.lng,
-          fromCity: updated.fromCity,
-          toCity: updated.toCity,
-          routeCities: updated.routeCities,
-        })
-
-        return updated
-      })
+          lastUpdated: data.lastUpdated || new Date().toISOString()
+        };
+      });
     });
 
     socket.on("routeData", (data) => {
@@ -179,27 +158,19 @@ export default function App() {
   const handleTrackBus = (b) => {
     if (!b || !b.busId) return;
 
-    // If currently tracking another bus, leave its room — the socket effect will also handle cleanup
+    // If currently tracking another bus, leave its room
     if (busInfo && busInfo.busId && busInfo.busId !== b.busId) {
-      try {
-        socket.emit('leaveBus', busInfo.busId);
-      } catch (e) {
-        // ignore
-      }
+      socket.emit('leaveBus', busInfo.busId);
     }
 
-    // Merge existing live coordinates if available to avoid overwriting with stale API data
-    setBusInfo((prev) => {
-      const prevCoords = prev && prev.busId === b.busId ? { lat: prev.lat, lng: prev.lng, latitude: prev.latitude, longitude: prev.longitude } : {}
-      const apiCoords = { lat: b.lat ?? b.latitude, lng: b.lng ?? b.longitude }
-      const finalLat = prevCoords.lat ?? prevCoords.latitude ?? apiCoords.lat ?? null
-      const finalLng = prevCoords.lng ?? prevCoords.longitude ?? apiCoords.lng ?? null
-      return {
-        ...b,
-        ...(finalLat !== null ? { lat: finalLat, latitude: finalLat } : {}),
-        ...(finalLng !== null ? { lng: finalLng, longitude: finalLng } : {}),
-      }
-    })
+    // Set the new bus to track
+    setBusInfo({
+      ...b,
+      lat: b.lat ?? b.latitude,
+      lng: b.lng ?? b.longitude,
+      latitude: b.lat ?? b.latitude,
+      longitude: b.lng ?? b.longitude
+    });
     setShowStatus(true);
     setMessage(`🔎 Now tracking bus ${b.busId} (${b.fromCity} → ${b.toCity})`);
   }
@@ -225,10 +196,7 @@ export default function App() {
         setBuses(data.data || []);
         if (data.data && data.data.length > 0) {
           setRouteData(data.data[0].routeCities || [fromCity, toCity]);
-          // Auto-select the first bus in results but do not start tracking automatically
-          setBusInfo((prev) => prev && prev.busId === data.data[0].busId ? prev : data.data[0]);
-          setMessage(`🔍 Found ${data.data.length} bus(es) for ${fromCity} → ${toCity}`);
-          // leave showStatus as-is (user should click Track Bus to view live data)
+          setMessage(`🔍 Found ${data.data.length} bus(es). Click "Track Bus" to start monitoring.`);
         } else {
           setRouteData([fromCity, toCity]);
           setMessage("No buses found for this route yet");
@@ -346,18 +314,20 @@ export default function App() {
 
                   <button
                     onClick={() => handleTrackBus(b)}
+                    disabled={busInfo?.busId === b.busId}
                     style={{
-                      backgroundColor: busInfo?.busId === b.busId ? "#33a84e" : "#1c87de",
+                      backgroundColor: busInfo?.busId === b.busId ? "#4CAF50" : "#1c87de",
                       color: "white",
                       border: "none",
                       padding: "8px 16px",
                       borderRadius: "4px",
-                      cursor: "pointer",
+                      cursor: busInfo?.busId === b.busId ? "default" : "pointer",
                       width: "100%",
                       marginTop: "10px",
+                      opacity: busInfo?.busId === b.busId ? 0.8 : 1
                     }}
                   >
-                    {busInfo?.busId === b.busId ? "✓ Tracking" : "Track Bus"}
+                    {busInfo?.busId === b.busId ? "✓ Currently Tracking" : "Track Bus"}
                   </button>
                 </div>
               ))}
